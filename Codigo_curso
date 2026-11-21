@@ -1,0 +1,1335 @@
+1.	Resumo executivo
+
+Verificar os pontos extremos de operação do SIN.
+2. Contexto e problema
+
+Os maiores problema de atendimento do setor eletrico são: 
+
+- valores maximos de carga, onde se faz necessario o despacho otimizado das gerações presentes no SIN.
+
+- valores minimos de carga, onde se faz necessario operar o sistema reduzindo parte gerações despachada, abrindo linhas de transmissão do SIN e outras medidas operativa.
+3. Compreensão do conjunto de dados
+
+O conjunto de dados fornecido continha informações de:
+
+Código do Subsistema da Usina
+
+Nome do Subsistema
+
+Data de Referência
+
+Valor verificado de geração hidráulica, em MWmed
+
+Valor verificado de geração térmica, em MWmed
+
+Valor verificado de geração eólica, em MWmed
+
+Valor verificado de geração fotovoltaica, em MWmed
+
+Valor verificado da carga, em MWmed
+
+Valor verificado do intercâmbio líquido, em MWmed
+# local dos dados brutos da Base_Dados_Projeto_Integrador_Dados_Brutos
+
+import pandas as pd
+from pathlib import Path
+import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# OS ARQUIVOS ESTÃO NO MESMO DIRETÓRIO DO SCRIPT, PORTANTO, NÃO É NECESSÁRIO INFORMAR O CAMINHO COMPLETO
+
+pasta = Path(".")  # Diretório atual
+
+# Arquivos que serão importados
+arquivos = [
+    "BALANCO_ENERGIA_SUBSISTEMA_2023.csv",
+    "BALANCO_ENERGIA_SUBSISTEMA_2024.csv",
+    "BALANCO_ENERGIA_SUBSISTEMA_2025.csv"
+]
+
+lista_df = []
+
+for arquivo in arquivos:
+
+    caminho = pasta / arquivo
+
+#    print(f"Importando: {arquivo}")
+
+    df = pd.read_csv(caminho, sep=";")
+
+    # Identifica o arquivo de origem
+    #df["arquivo_origem"] = arquivo
+
+    lista_df.append(df)
+
+# Junta os três arquivos em um único DataFrame
+df_final = pd.concat(lista_df, ignore_index=True)
+
+#print("\nImportação concluída!")
+#print(df_final.shape)
+
+# verifica se os dados foram importados corretamente
+# print(df_final.head())
+
+#print(df_final.info())
+
+# Carregar o dicionário JSON usando a codificação UTF-8 para evitar problemas com caracteres especiais
+with open("DicionarioDados_Balanco_Energia_Subsistema.json", "r", encoding="utf-8") as arquivo:
+    dicionario_colunas = json.load(arquivo)
+
+#print("\nDicionário de colunas carregado!", dicionario_colunas)
+
+lista_descricao = [
+    item["descricao"]
+    for item in dicionario_colunas["dicionario_simplificado"]
+ ]
+
+# alterar os nomes das colunas do DataFrame com base na lista de descrições do DicionarioDados_Balanco_Energia_Subsistema.json
+df_final.columns = lista_descricao
+
+# verifica se as colunas foram alteradas corretamente
+#print(df_final.columns)
+
+#verifica dados não numerico nas colunas que deveriam ser numericas
+# df_final.info()
+
+# df_final.shape
+
+#convertendo a coluna "Data de Referência" para o tipo datetime 2023-01-01 00:00:00
+df_final["Data de Referência"] = pd.to_datetime(df_final["Data de Referência"], format="%Y-%m-%d %H:%M:%S")
+
+df_final["ano"] = df_final["Data de Referência"].dt.year
+df_final["mes"] = df_final["Data de Referência"].dt.month
+df_final["dia"] = df_final["Data de Referência"].dt.day
+df_final["hora"] = df_final["Data de Referência"].dt.hour
+
+print(df_final.info())
+
+# retirar 99.999 dos valores das colunas
+
+import pandas as pd
+
+# Selecionar colunas numéricas
+colunas_numericas = df_final.select_dtypes(include="number").columns
+
+for coluna in colunas_numericas:
+
+    # Converter a coluna para float64
+    df_final[coluna] = df_final[coluna].astype("float64")
+
+    # Converter temporariamente para string
+    valores = df_final[coluna].astype(str)
+
+    # Remover o .0 apenas dos números inteiros
+    # valores = valores.str.replace(r"\.0$", "", regex=True)
+
+    # Identificar valores terminados em 99999
+    mascara = valores.str.endswith("99999", na=False)
+
+    # Só executar se houver valores para corrigir
+    if mascara.any():
+
+        # Retirar os últimos 5 dígitos
+        valores_corrigidos = pd.to_numeric(
+            valores.loc[mascara].str[:-5],
+            errors="coerce"
+        )
+
+        # Sobrescrever os valores
+        df_final.loc[mascara, coluna] = valores_corrigidos.astype("float64")
+
+        print(f"{coluna}: {mascara.sum()} valores corrigidos")
+
+# 
+
+#exportar dataframe final para um arquivo CSV
+# caminho_saida = pasta / "BALANCO_ENERGIA_SUBSISTEMA_2023_2024_2025.csv"
+# df_final.to_csv(caminho_saida, index=False, encoding='utf-8-sig', sep=";")
+# identificar os valores maximos e minimos das colunas numéricas por subsistema e por ano, para verificar se existem valores fora do esperado.
+# coincidentes e não coincidentes entre os subsistemas.
+
+print(df.describe(include="all"))
+
+idx_max = df_final.groupby("Nome do Subsistema")["Valor verificado da carga, em MWmed"].idxmax()
+idx_min = df_final.groupby("Nome do Subsistema")["Valor verificado da carga, em MWmed"].idxmin()
+
+maximos = df_final.loc[idx_max, ["Nome do Subsistema", "Data de Referência", "Valor verificado da carga, em MWmed"]]
+minimos = df_final.loc[idx_min, ["Nome do Subsistema", "Data de Referência", "Valor verificado da carga, em MWmed"]]
+
+print("\nMÁXIMOS")
+print(maximos)
+
+print("\nMÍNIMOS")
+print(minimos)
+
+idx_max = (
+    df_final.groupby(["Nome do Subsistema", "ano"])
+    ["Valor verificado da carga, em MWmed"]
+    .idxmax()
+)
+idx_min = (
+    df_final.groupby(["Nome do Subsistema", "ano"])
+    ["Valor verificado da carga, em MWmed"]
+    .idxmin()
+)
+# Máximos
+maximos = df_final.loc[
+    idx_max,
+    [
+        "Nome do Subsistema",
+        "ano",
+        "Data de Referência",
+        "Valor verificado da carga, em MWmed"
+    ]
+]
+# Mínimos
+minimos = df_final.loc[
+    idx_min,
+    [
+        "Nome do Subsistema",
+        "ano",
+        "Data de Referência",
+        "Valor verificado da carga, em MWmed"
+    ]
+]
+print(f"\nValores maximos para os subsistema por ano \n", idx_max)
+print(f"\nValores minimos para os subsistema por ano \n", idx_min)
+            # Índices dos valores máximos e mínimos por Subsistema e Ano
+# Identificação
+maximos["Tipo"] = "idx_max"
+
+comparacao = maximos.copy()
+
+# Garantir que a data esteja no formato datetime
+comparacao["Data de Referência"] = pd.to_datetime(
+    comparacao["Data de Referência"]
+)
+
+# Ordenar os subsistemas pelo maior valor de carga
+ordem_subsistemas = (
+    comparacao
+    .groupby("Nome do Subsistema")[
+        "Valor verificado da carga, em MWmed"
+    ]
+    .max()
+    .sort_values(ascending=False)
+    .index
+    .tolist()
+)
+
+# Criar gráficos
+g = sns.catplot(
+    data=comparacao,
+    x="ano",
+    y="Valor verificado da carga, em MWmed",
+    hue="Tipo",
+    col="Nome do Subsistema",
+    col_order=ordem_subsistemas,
+    kind="bar",
+    col_wrap=2,
+    height=4,
+    aspect=1.3,
+    sharey=False
+)
+
+# Título de cada gráfico
+g.set_titles("{col_name}")
+
+# Título geral
+g.fig.suptitle(
+    "Valores Máximos de Carga do SIN e por Subsistemas (Não Coincidentes)",
+    fontsize=16,
+    fontweight="bold",
+    y=1.03
+)
+
+# Percorrer cada subsistema
+for ax, subsistema in zip(
+    g.axes.flat,
+    ordem_subsistemas
+):
+
+    # Eixos
+    ax.set_xlabel("Ano")
+    ax.set_ylabel("Carga (MWmed)")
+
+    # Mostrar os anos em todos os gráficos
+    ax.tick_params(
+        axis="x",
+        labelbottom=True
+    )
+
+    # Dados do subsistema
+    dados_sub = (
+        comparacao[
+            comparacao["Nome do Subsistema"] == subsistema
+        ]
+        .sort_values("ano")
+        .reset_index(drop=True)
+    )
+
+    # Barras do gráfico
+    barras = ax.patches
+
+    # Maior valor de carga do subsistema
+    maior_valor = dados_sub[
+        "Valor verificado da carga, em MWmed"
+    ].max()
+
+    # ------------------------------------------------
+    # Posições fixas das informações
+    # ------------------------------------------------
+
+    # Data/hora
+    y_data = maior_valor * 1.04
+
+    # Valor de carga
+    y_valor = maior_valor * 1.10
+
+    # ------------------------------------------------
+    # Adicionar valor + data/hora
+    # ------------------------------------------------
+
+    for barra, (_, linha) in zip(
+        barras,
+        dados_sub.iterrows()
+    ):
+
+        valor = linha[
+            "Valor verificado da carga, em MWmed"
+        ]
+
+        data = linha[
+            "Data de Referência"
+        ]
+
+        # -----------------------------
+        # Formatar valor
+        # -----------------------------
+
+        valor_texto = (
+            f"{valor:,.0f}"
+            .replace(",", ".")
+        )
+
+        # -----------------------------
+        # Formatar data + horário
+        # -----------------------------
+
+        data_hora_texto = data.strftime(
+            "%d/%m/%Y %H:%M"
+        )
+
+        # Centro da barra
+        x = (
+            barra.get_x()
+            + barra.get_width() / 2
+        )
+
+        # -----------------------------
+        # Data e horário
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_data,
+            data_hora_texto,
+            ha="center",
+            va="bottom",
+            fontsize=7
+        )
+
+        # -----------------------------
+        # Valor máximo
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_valor,
+            valor_texto,
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold"
+        )
+
+    # ------------------------------------------------
+    # Ajustar escala
+    # ------------------------------------------------
+
+    ax.set_ylim(
+        0,
+        maior_valor * 1.20
+    )
+
+    # Grid horizontal
+    ax.grid(
+        axis="y",
+        alpha=0.3
+    )
+    
+# Ajustar layout
+plt.tight_layout()
+
+# Mostrar
+plt.show()
+Observamos nos graficos do periodo de 2023,2024 e 2025 que:
+
+SIN: Máximo coincidente entre todos os subsistemas, ocorreu em 26/02/2025, dia útil, as 14hs no pico do horario comercial onde ocorreu temperatura elevada principalmente no Sudeste/Centro-Oeste e SUL. Para todo o SIN, o horario de maior carga ocorreu as 14 hs influenciado pelo influencia dos subsistemas Sudeste/Centro-Oeste e Sul.
+
+Sudeste/Centro-Oeste: subsistema de maior influencia na carga do SIN, máximo ocorreu em 18/02/2025, dia útil, as 14hs no pico do horario comercial onde ocorreu temperatura elevada. No ano de 2024 observamos uma redução em relação a 2023. Neste subsistema observamos que o maior valor critico ocorreu no periodo das 14hs em todos os anos.
+
+Sul: apresentou crescimento contínuo dos máximos, atingindo o maior valor em 18/02/2025, dia útil, as 14hs no pico do horario comercial onde ocorreu temperatura elevada.
+Neste subsistema, também observamos que o maior valor critico ocorreu no periodo das 14hs em todos os anos.
+
+Nordeste: tem um comportamento mais variável, com máximo em 08/02/2024 e redução em 2025. Observa-se que os maximos ocorreram em horarios distintos.
+
+Norte: apresenta crescimento consistente, com maximo valor ocorrendo em 17/11/2025, o que indica umao forte expansão da carga. Observa-se que a maior carga nos anos de 2023 e 2024 ocorreu no final do perído de inverno e em 2025 passou para novembro. Observa-se que os maximos ocorreram em horarios distintos, e que em 2023 e 2025 foram em horarios proximos.
+# Identificação
+minimos["Tipo"] = "idx_min"
+
+comparacao = minimos.copy()
+
+# Garantir que a data esteja no formato datetime
+comparacao["Data de Referência"] = pd.to_datetime(
+    comparacao["Data de Referência"]
+)
+
+# Ordenar os subsistemas pelo maior valor de carga
+ordem_subsistemas = (
+    comparacao
+    .groupby("Nome do Subsistema")[
+        "Valor verificado da carga, em MWmed"
+    ]
+    .max()
+    .sort_values(ascending=False)
+    .index
+    .tolist()
+)
+
+# Criar gráficos
+g = sns.catplot(
+    data=comparacao,
+    x="ano",
+    y="Valor verificado da carga, em MWmed",
+    hue="Tipo",
+    col="Nome do Subsistema",
+    col_order=ordem_subsistemas,
+    kind="bar",
+    col_wrap=2,
+    height=4,
+    aspect=1.3,
+    sharey=False
+)
+
+# Título de cada gráfico
+g.set_titles("{col_name}")
+
+# Título geral
+g.fig.suptitle(
+    "Valores Mínimos de Carga do SIN e por Subsistemas (Não Coincidentes)",
+    fontsize=16,
+    fontweight="bold",
+    y=1.03
+)
+
+# Percorrer cada subsistema
+for ax, subsistema in zip(
+    g.axes.flat,
+    ordem_subsistemas
+):
+
+    # Eixos
+    ax.set_xlabel("Ano")
+    ax.set_ylabel("Carga (MWmed)")
+
+    # Mostrar os anos em todos os gráficos
+    ax.tick_params(
+        axis="x",
+        labelbottom=True
+    )
+
+    # Dados do subsistema
+    dados_sub = (
+        comparacao[
+            comparacao["Nome do Subsistema"] == subsistema
+        ]
+        .sort_values("ano")
+        .reset_index(drop=True)
+    )
+
+    # Barras do gráfico
+    barras = ax.patches
+
+    # Maior valor de carga do subsistema
+    maior_valor = dados_sub[
+        "Valor verificado da carga, em MWmed"
+    ].max()
+
+    # ------------------------------------------------
+    # Posições fixas das informações
+    # ------------------------------------------------
+
+    # Data/hora
+    y_data = maior_valor * 1.04
+
+    # Valor de carga
+    y_valor = maior_valor * 1.10
+
+    # ------------------------------------------------
+    # Adicionar valor + data/hora
+    # ------------------------------------------------
+
+    for barra, (_, linha) in zip(
+        barras,
+        dados_sub.iterrows()
+    ):
+
+        valor = linha[
+            "Valor verificado da carga, em MWmed"
+        ]
+
+        data = linha[
+            "Data de Referência"
+        ]
+
+        # -----------------------------
+        # Formatar valor
+        # -----------------------------
+
+        valor_texto = (
+            f"{valor:,.0f}"
+            .replace(",", ".")
+        )
+
+        # -----------------------------
+        # Formatar data + horário
+        # -----------------------------
+
+        data_hora_texto = data.strftime(
+            "%d/%m/%Y %H:%M"
+        )
+
+        # Centro da barra
+        x = (
+            barra.get_x()
+            + barra.get_width() / 2
+        )
+
+        # -----------------------------
+        # Data e horário
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_data,
+            data_hora_texto,
+            ha="center",
+            va="bottom",
+            fontsize=7
+        )
+
+        # -----------------------------
+        # Valor máximo
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_valor,
+            valor_texto,
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold"
+        )
+
+    # ------------------------------------------------
+    # Ajustar escala
+    # ------------------------------------------------
+
+    ax.set_ylim(
+        0,
+        maior_valor * 1.20
+    )
+
+    # Grid horizontal
+    ax.grid(
+        axis="y",
+        alpha=0.3
+    )
+
+# Ajustar layout
+plt.tight_layout()
+
+# Mostrar
+plt.show()
+Os valores do grafico para o subsistema Norte em 2023 estão muito reduzidos em relação ao historico.
+
+Verificamos que em 15/08/2023 ocorreu uma perturbação de grande porte no Sistema Interligado Nacional (SIN), e isso explica esse valor baixo observado no dado de carga do Nordeste em 2023.
+#Retirando os valores do dia 15/08/2023 para identificar os valores máximos e mínimos por subsistema e por ano, para verificar se existem valores fora do esperado.
+
+df_sem_ocorrencia = df_final[
+    df_final["Data de Referência"].dt.normalize() != pd.Timestamp("2023-08-15")
+]
+
+ano = 2023  # Substitua pelo ano desejado
+
+idx_max = (
+    df_sem_ocorrencia.groupby(["Nome do Subsistema", "ano"])
+    ["Valor verificado da carga, em MWmed"]
+    .idxmax()
+)
+idx_min_sem_ocorrencia = (
+    df_sem_ocorrencia.groupby(["Nome do Subsistema", "ano"])
+    ["Valor verificado da carga, em MWmed"]
+    .idxmin()
+)
+# Máximos
+maximos = df_sem_ocorrencia.loc[
+    idx_max,
+    [
+        "Nome do Subsistema",
+        "ano",
+        "Data de Referência",
+        "Valor verificado da carga, em MWmed"
+    ]
+]
+# Mínimos
+minimos = df_sem_ocorrencia.loc[
+    idx_min_sem_ocorrencia,
+    [
+        "Nome do Subsistema",
+        "ano",
+        "Data de Referência",
+        "Valor verificado da carga, em MWmed"
+    ]
+]
+print(f"\nValores maximos para os subsistema no ano {ano}:", idx_max)
+print(f"\nValores minimos para os subsistema no ano {ano}:", idx_min_sem_ocorrencia)
+            # Índices dos valores máximos e mínimos por Subsistema e Ano
+# Identificação
+minimos["Tipo"] = "idx_min_sem_ocorrencia"
+
+comparacao = minimos.copy()
+
+# Garantir que a data esteja no formato datetime
+comparacao["Data de Referência"] = pd.to_datetime(
+    comparacao["Data de Referência"]
+)
+
+# Ordenar os subsistemas pelo maior valor de carga
+ordem_subsistemas = (
+    comparacao
+    .groupby("Nome do Subsistema")[
+        "Valor verificado da carga, em MWmed"
+    ]
+    .max()
+    .sort_values(ascending=False)
+    .index
+    .tolist()
+)
+
+# Criar gráficos
+g = sns.catplot(
+    data=comparacao,
+    x="ano",
+    y="Valor verificado da carga, em MWmed",
+    hue="Tipo",
+    col="Nome do Subsistema",
+    col_order=ordem_subsistemas,
+    kind="bar",
+    col_wrap=2,
+    height=4,
+    aspect=1.3,
+    sharey=False
+)
+
+# Título de cada gráfico
+g.set_titles("{col_name}")
+
+# Título geral
+g.fig.suptitle(
+    "Valores Mínimos de Carga do SIN e por Subsistemas (Não Coincidentes)",
+    fontsize=16,
+    fontweight="bold",
+    y=1.03
+)
+
+# Percorrer cada subsistema
+for ax, subsistema in zip(
+    g.axes.flat,
+    ordem_subsistemas
+):
+
+    # Eixos
+    ax.set_xlabel("Ano")
+    ax.set_ylabel("Carga (MWmed)")
+
+    # Mostrar os anos em todos os gráficos
+    ax.tick_params(
+        axis="x",
+        labelbottom=True
+    )
+
+    # Dados do subsistema
+    dados_sub = (
+        comparacao[
+            comparacao["Nome do Subsistema"] == subsistema
+        ]
+        .sort_values("ano")
+        .reset_index(drop=True)
+    )
+
+    # Barras do gráfico
+    barras = ax.patches
+
+    # Maior valor de carga do subsistema
+    maior_valor = dados_sub[
+        "Valor verificado da carga, em MWmed"
+    ].max()
+
+    # ------------------------------------------------
+    # Posições fixas das informações
+    # ------------------------------------------------
+
+    # Data/hora
+    y_data = maior_valor * 1.04
+
+    # Valor de carga
+    y_valor = maior_valor * 1.10
+
+    # ------------------------------------------------
+    # Adicionar valor + data/hora
+    # ------------------------------------------------
+
+    for barra, (_, linha) in zip(
+        barras,
+        dados_sub.iterrows()
+    ):
+
+        valor = linha[
+            "Valor verificado da carga, em MWmed"
+        ]
+
+        data = linha[
+            "Data de Referência"
+        ]
+
+        # -----------------------------
+        # Formatar valor
+        # -----------------------------
+
+        valor_texto = (
+            f"{valor:,.0f}"
+            .replace(",", ".")
+        )
+
+        # -----------------------------
+        # Formatar data + horário
+        # -----------------------------
+
+        data_hora_texto = data.strftime(
+            "%d/%m/%Y %H:%M"
+        )
+
+        # Centro da barra
+        x = (
+            barra.get_x()
+            + barra.get_width() / 2
+        )
+
+        # -----------------------------
+        # Data e horário
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_data,
+            data_hora_texto,
+            ha="center",
+            va="bottom",
+            fontsize=7
+        )
+
+        # -----------------------------
+        # Valor máximo
+        # -----------------------------
+
+        ax.text(
+            x,
+            y_valor,
+            valor_texto,
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold"
+        )
+
+    # ------------------------------------------------
+    # Ajustar escala
+    # ------------------------------------------------
+
+    ax.set_ylim(
+        0,
+        maior_valor * 1.20
+    )
+
+    # Grid horizontal
+    ax.grid(
+        axis="y",
+        alpha=0.3
+    )
+
+# Ajustar layout
+plt.tight_layout()
+
+# Mostrar
+plt.show()
+Não considerando a data de 15/08/2023, verificamos que a menor carga do subsistema norte foi identificada no dia 01/01/2023.
+
+Assim, observamos nos graficos do periodo de 2023,2024 e 2025 que:
+
+SIN: Minimo coincidente entre todos os subsistemas, ocorreu em 01/01/2023, feriado da CONFRATERNIZAÇÃO UNIVERSAL, as 09hs. Em 2024 ocorreu em 02/06/2024 as 06hs, domingo depois do feriado de corpu-christie. Em 2025 ocorreu no dia 10/08/2025 as 14hs, segundo domingo do mês de agosto onde se comemora o dia dos pais.
+
+Sudeste/Centro-Oeste: Minimo ocorreu em 01/01/2023, feriado da CONFRATERNIZAÇÃO UNIVERSAL, as 08hs. Em 2024 ocorreu em 11/08/2024 as 06hs, segundo domingo do mês de agosto onde se comemora o dia dos pais. Em 2025 ocorreu no dia 06/07/2025 as 04hs, domingo.
+
+Sul: Minimo ocorreu em 09/04/2023, as 13hs, feriado de pascoa, com final de semana prolongado. Em 2024 ocorreu em 13/10/2024 as 05hs, domingo depois do feriado de N. SRA. Aparecida. Em 2025 ocorreu no dia 10/08/2025 as 14hs, segundo domingo do mês de agosto onde se comemora o dia dos pais.
+
+Nordeste: Minimo  ocorreu em 07/04/2023, feriado da paixão de Cristo, as 10hs. Em 2024 ocorreu em 09/11/2024 as 12hs, sábado. Em 2025 ocorreu no dia 13/07/2025 as 14hs, domingo.
+
+Norte: Minimo  ocorreu em 01/01/2023 as 12hs, feriado da da CONFRATERNIZAÇÃO UNIVERSAL. Em 2024 ocorreu em 01/01/2024 as 06hs, feriado da da CONFRATERNIZAÇÃO UNIVERSAL. Em 2025 ocorreu no dia 25/15/2025 as 15hs, feriado de natal.
+
+# agora quero gerar graficos de colunas horizontais para os valores máximos e mínimos de carga por subsistema e por ano, explicitando os valores das colunas de geração
+coluna_carga = "Valor verificado da carga, em MWmed"
+coluna_data = "Data de Referência"
+coluna_subsistema = "Nome do Subsistema"
+coluna_ano = "ano"
+
+# Ajuste para os nomes reais das colunas do seu DataFrame
+colunas_geracao = [
+    "Valor verificado de geração hidráulica, em MWmed", 
+    "Valor verificado de geração térmica, em MWmed",
+    "Valor verificado de geração eólica, em MWmed",
+    "Valor verificado de geração fotovoltaica, em MWmed",
+    "Valor verificado do intercâmbio líquido, em MWmed"
+]
+
+# Garantir os tipos corretos
+df_sem_ocorrencia[coluna_data] = pd.to_datetime(
+    df_sem_ocorrencia[coluna_data],
+    dayfirst=True,
+    errors="coerce"
+)
+
+df_sem_ocorrencia[coluna_ano] = df_sem_ocorrencia[coluna_data].dt.year
+
+df_sem_ocorrencia[coluna_carga] = pd.to_numeric(
+    df_sem_ocorrencia[coluna_carga],
+    errors="coerce"
+)
+
+for coluna in colunas_geracao:
+    df_sem_ocorrencia[coluna] = pd.to_numeric(
+        df_sem_ocorrencia[coluna],
+        errors="coerce"
+    )
+
+# Remover linhas sem carga, data ou subsistema
+df_analise = df_sem_ocorrencia.dropna(
+    subset=[
+        coluna_subsistema,
+        coluna_data,
+        coluna_carga,
+        coluna_ano
+    ]
+).copy()
+
+# Índices das cargas máximas e mínimas
+idx_max = (
+    df_analise
+    .groupby([coluna_subsistema, coluna_ano])[coluna_carga]
+    .idxmax()
+)
+
+idx_min = (
+    df_analise
+    .groupby([coluna_subsistema, coluna_ano])[coluna_carga]
+    .idxmin()
+)
+
+# Registros completos dos instantes selecionados
+dados_maximos = df_analise.loc[idx_max].copy()
+dados_minimos = df_analise.loc[idx_min].copy()
+
+dados_maximos["Tipo de carga"] = "Máxima"
+dados_minimos["Tipo de carga"] = "Mínima"
+def grafico_parcelas_geracao(dados, tipo_carga):
+
+    if dados.empty:
+        print(f"Não existem dados para carga {tipo_carga}.")
+        return
+
+    ordem_subsistemas = (
+        dados
+        .groupby(coluna_subsistema)[coluna_carga]
+        .max()
+        .sort_values(ascending=False)
+        .index
+        .tolist()
+    )
+
+    print("Subsistemas encontrados:", ordem_subsistemas)
+
+    for subsistema in ordem_subsistemas:
+
+        dados_sub = (
+            dados[
+                dados[coluna_subsistema] == subsistema
+            ]
+            .sort_values(coluna_ano)
+            .copy()
+        )
+
+        print(
+            f"Gerando gráfico: {subsistema} - "
+            f"{len(dados_sub)} registros"
+        )
+
+        # Verificar se existem colunas de geração
+        dados_grafico = (
+            dados_sub
+            .set_index(coluna_ano)[colunas_geracao]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(0)
+        )
+
+        # Criar figura explicitamente
+        fig, ax = plt.subplots(
+            figsize=(12, 6)
+        )
+
+        dados_grafico.plot(
+            kind="bar",
+            stacked=True,
+            width=0.75,
+            ax=ax
+        )
+
+        ax.set_title(
+            f"Parcelas de Geração - Carga {tipo_carga}\n"
+            f"{subsistema}",
+            fontsize=14,
+            fontweight="bold"
+        )
+
+        ax.set_xlabel("Ano")
+        ax.set_ylabel("Geração (MWmed)")
+
+        ax.tick_params(
+            axis="x",
+            rotation=0
+        )
+
+        ax.grid(
+            axis="y",
+            alpha=0.3
+        )
+
+        # --------------------------
+        # Valores dentro das barras
+        # --------------------------
+
+        for container in ax.containers:
+
+            labels = []
+
+            for barra in container:
+
+                valor = barra.get_height()
+
+                if pd.notna(valor) and valor > 0:
+
+                    labels.append(
+                        f"{valor:,.0f}".replace(",", ".")
+                    )
+
+                else:
+                    labels.append("")
+
+            ax.bar_label(
+                container,
+                labels=labels,
+                label_type="center",
+                fontsize=8
+            )
+
+        # --------------------------
+        # Soma das parcelas
+        # --------------------------
+
+        totais = dados_grafico.sum(axis=1)
+
+        # --------------------------
+        # Carga e data
+        # --------------------------
+
+        for posicao, (_, linha) in enumerate(
+            dados_sub.iterrows()
+        ):
+
+            carga = linha[coluna_carga]
+
+            carga_texto = (
+                f"{carga:,.0f}"
+                .replace(",", ".")
+            )
+
+            data_texto = linha[coluna_data].strftime(
+                "%d/%m/%Y %H:%M"
+            )
+
+            ax.text(
+                posicao,
+                totais.iloc[posicao] * 1.1,
+                f"Carga: {carga_texto} MWmed\n"
+                f"{data_texto}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                fontweight="bold"
+            )
+
+        # --------------------------
+        # Ajustar escala
+        # --------------------------
+
+        maior_total = totais.max()
+
+        if maior_total > 0:
+
+            ax.set_ylim(
+                0,
+                maior_total * 1.25
+            )
+
+        # --------------------------
+        # Legenda
+        # --------------------------
+
+        ax.legend(
+            title="Fonte de geração",
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left"
+        )
+
+        plt.tight_layout()
+
+        # Mostrar explicitamente a figura
+        plt.show()
+def grafico_parcelas_geracao(dados, tipo_carga):
+
+    if dados.empty:
+        print(f"Não existem dados para carga {tipo_carga}.")
+        return
+
+    # Ordenar subsistemas pela carga
+    ordem_subsistemas = (
+        dados
+        .groupby(coluna_subsistema)[coluna_carga]
+        .max()
+        .sort_values(ascending=False)
+        .index
+        .tolist()
+    )
+
+    for subsistema in ordem_subsistemas:
+
+        # -------------------------------------------------
+        # DADOS DO SUBSISTEMA
+        # -------------------------------------------------
+
+        dados_sub = (
+            dados[
+                dados[coluna_subsistema] == subsistema
+            ]
+            .sort_values(coluna_ano)
+            .copy()
+        )
+
+        # Parcelas de geração
+        dados_grafico = (
+            dados_sub
+            .set_index(coluna_ano)[colunas_geracao]
+            .apply(pd.to_numeric, errors="coerce")
+            .fillna(0)
+        )
+
+        # -------------------------------------------------
+        # CRIAR GRÁFICO
+        # -------------------------------------------------
+
+        fig, ax = plt.subplots(
+            figsize=(12, 6)
+        )
+
+        dados_grafico.plot(
+            kind="bar",
+            stacked=True,
+            width=0.75,
+            ax=ax
+        )
+
+        # -------------------------------------------------
+        # TÍTULO
+        # -------------------------------------------------
+
+        ax.set_title(
+            f"Parcelas de Geração nos Instantes de Carga {tipo_carga}\n"
+            f"{subsistema}",
+            fontsize=14,
+            fontweight="bold"
+        )
+
+        ax.set_xlabel("Ano")
+        ax.set_ylabel("Geração (MWmed)")
+
+        ax.tick_params(
+            axis="x",
+            rotation=0
+        )
+
+        ax.grid(
+            axis="y",
+            alpha=0.3
+        )
+
+        # -------------------------------------------------
+        # VALORES DE CADA PARCELA
+        # -------------------------------------------------
+
+        for container in ax.containers:
+
+            labels = []
+
+            for barra in container:
+
+                valor = barra.get_height()
+
+                if pd.notna(valor) and valor > 0:
+
+                    labels.append(
+                        f"{valor:,.0f}".replace(",", ".")
+                    )
+
+                else:
+                    labels.append("")
+
+            ax.bar_label(
+                container,
+                labels=labels,
+                label_type="center",
+                fontsize=8
+            )
+
+        # -------------------------------------------------
+        # TOTAL DE GERAÇÃO DE CADA ANO
+        # -------------------------------------------------
+
+        totais = dados_grafico.sum(axis=1)
+
+        # Maior barra de geração entre TODOS os anos
+        maior_total_geracao = totais.max()
+
+        # -------------------------------------------------
+        # POSIÇÃO FIXA DOS TEXTOS
+        # -------------------------------------------------
+
+        # Todos os textos ficarão alinhados acima
+        # da maior barra de geração
+        
+        # criar um ajuste de valores para os subisitemas com valores muito baixos, para que o texto não fique sobre a barra
+        
+        if subsistema == "SISTEMA INTERLIGADO NACIONAL": 
+            ajuste = 1
+        elif subsistema == "SUDESTE/CENTRO-OESTE":
+            ajuste = 1.2
+        elif subsistema == "SUL":
+            ajuste = 1.2
+        elif subsistema == "NORDESTE":
+            ajuste = 1.1
+        elif subsistema == "NORTE":
+            ajuste = 1.1
+        
+        
+        y_texto = maior_total_geracao * 1.04 * ajuste
+        print(f"Subsistema: {subsistema}, ajuste: {ajuste}, y_texto: {y_texto}")
+
+        # -------------------------------------------------
+        # CARGA MÁXIMA + DATA + HORÁRIO
+        # -------------------------------------------------
+
+        for posicao, (_, linha) in enumerate(
+            dados_sub.iterrows()
+        ):
+
+            carga = linha[coluna_carga]
+            data = linha[coluna_data]
+
+            # Formatar carga
+            carga_texto = (
+                f"{carga:,.0f}"
+                .replace(",", ".")
+            )
+
+            # Data
+            data_texto = data.strftime(
+                "%d/%m/%Y"
+            )
+
+            # Horário
+            hora_texto = data.strftime(
+                "%H:%M"
+            )
+
+            # Texto completo
+            texto = (
+                f"Carga: {carga_texto} MWmed\n"
+                f"{data_texto} "
+                f"{hora_texto}"
+            )
+
+            # Texto alinhado pela maior barra
+            ax.text(
+                posicao,
+                y_texto,
+                texto,
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                fontweight="bold"
+            )
+
+        # -------------------------------------------------
+        # AJUSTAR ESCALA
+        # -------------------------------------------------
+
+        # Criar espaço acima para carga + data + horário
+        ax.set_ylim(
+            0,
+            maior_total_geracao * 1.5
+        )
+
+        # -------------------------------------------------
+        # LEGENDA
+        # -------------------------------------------------
+
+        ax.legend(
+            title="Fonte de geração",
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left"
+        )
+
+        plt.tight_layout()
+        plt.show()
+grafico_parcelas_geracao(
+    dados_maximos,
+    "Máxima"
+)
+Para o SIN observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•	Geração hidráulica teve maior participação em todos os anos, ,
+•	Gerações térmica e eólica reduzem sua participação de 2023 para 2024 e 2025
+•	Geração Fotovoltaica aumentam sua participação.
+
+Para o Sudeste/Centro Oeste observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•	Geração hidráulica teve maior participação em todos os anos;
+•	Gerações térmica reduzem sua participação de 2023 para 2024 e 2025;
+•	Geração eólica praticamente nula;
+•	Geração Fotovoltaica aumentam sua participação.
+O subsistema Sudeste/Centro Oeste recebeu intercambio de outras regiões para atender a carga máxima.
+
+Para o Sul observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•	Geração hidráulica teve maior participação em todos os anos;
+•	Gerações térmica reduzem sua participação de 2023 para 2024 e 2025;
+•	Geração eólica praticamente nula;
+•	Geração Fotovoltaica aumentam sua participação;
+O Sul recebeu intercambio de outras regiões para atender a carga máxima.
+
+Para o Nordeste observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•	Geração eólica teve maior participação em todos os anos;
+•	Gerações hidráulica e térmica reduzem sua participação de 2023 para 2024, mas em 2025 aumentam sua participação;
+•	Geração Fotovoltaica teve grande participação quando a máxima ocorreu durante o período claro do dia.
+O Nordeste forneceu intercambio para as outras regiões atenderem suas as cargas máximas.
+
+Para o Norte observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•	Geração hidráulica teve maior participação em 2023, reduziu em 2024 e cresceu em 2025;
+•	Gerações térmica aumentou sua participação de 2023 para 2024, e ficou próxima de 2024 para 2025;
+•	Geração eólica pequena em todos os anos;
+•	Geração Fotovoltaica teve participação quando a máxima ocorreu durante o período claro do dia.
+O Norte recebeu intercambio de outras regiões para atender a carga máxima.
+grafico_parcelas_geracao(
+    dados_minimos,
+    "Mínima"
+)
+Para o SIN observamos no momento de atendimento da carga mínima, a participação das fontes de geração ficou dividida em:
+•   Geração hidráulica teve maior participação em todos os anos,
+•   Gerações térmica aumentou sua participação de 2023 para 2024 e 2025
+•   Gerações eólica reduziu sua participação de 2023 para 2024 e 2025
+•   Geração Fotovoltaica aumentam sua participação, mas influenciada pelo horário de ocorrência da carga mínima.
+
+Para o Sudeste/Centro Oeste observamos no momento de atendimento da carga mínima, a participação das fontes de geração ficou dividida em:
+•   Geração hidráulica teve maior participação em todos os anos;
+•   Gerações térmica aumentou sua participação no período;
+•   Geração eólica praticamente nula;
+•   Geração Fotovoltaica depende d horário de ocorrência da carga mínima.
+O subsistema Sudeste/Centro Oeste recebeu intercambio de outras regiões para atender a carga mínima.
+
+Para o Nordeste observamos no momento de atendimento da carga máxima, a participação das fontes de geração ficou dividida em:
+•   Geração eólica e térmica tiveram maior participação em todos os anos;
+•   Gerações hidráulica manteve sua participação no período.
+•   Geração Fotovoltaica teve grande participação , pois os mínimos ocorreram durante o período claro do dia.
+O Nordeste forneceu intercambio para as outras regiões atenderem suas as cargas máximas.
+
+Para o Sul observamos no momento de atendimento da carga mínima, a participação das fontes de geração ficou dividida em:
+•   Geração hidráulica teve maior participação em todos os anos;
+•   Gerações térmica manteve sua participação no período;
+•   Geração eólica reduzida;
+•   Geração Fotovoltaica teve grande participação em 2025, devia a mínima carga ocorrer no  momento de pico de sol;
+O Sul recebeu intercambio de outras regiões para atender a carga máxima.
+
+Para o Norte observamos no momento de atendimento da carga mínima, a participação das fontes de geração ficou dividida em:
+•	Geração hidráulica teve maior participação em 2023, reduziu em 2024 e cresceu em 2025;
+•	Gerações térmica aumentou sua participação de 2023 para 2024, e teve menor participação de 2024 para 2025;
+•	Geração eólica pequena em todos os anos;
+•	Geração Fotovoltaica teve participação quando a mínima ocorreu durante o período claro do dia.
+O Norte recebeu intercambio de outras regiões para atender a carga mínima.
+Conclusões:
+
+1. Carga máxima
+•	SIN: máximo coincidente em 26/02/2025 (dia útil, 14h), com temperatura elevada, principalmente no Sudeste/Centro-Oeste e no Sul. O horário de maior carga foi 14h, influenciado por esses dois subsistemas.
+•	Sudeste/Centro-Oeste: subsistema de maior influência no SIN. Máximo em 18/02/2025 (dia útil, 14h). Houve redução em 2024 em relação a 2023, e o valor crítico ocorreu às 14h em todos os anos.
+•	Sul: máximos em crescimento contínuo, com o maior valor em 18/02/2025 (dia útil, 14h). O valor crítico ocorreu às 14h em todos os anos.
+•	Nordeste: comportamento mais variável, com máximo em 08/02/2024 e redução em 2025. Os máximos ocorreram em horários distintos.
+•	Norte: crescimento consistente, com máximo em 17/11/2025, indicando forte expansão da carga. Em 2023 e 2024 o máximo ocorreu no final do inverno e em 2025 passou para novembro. Os horários foram distintos, sendo próximos em 2023 e 2025. Desconsiderando 15/08/2023, a menor carga do Norte foi em 01/01/2023.
+2. Carga mínima
+•	SIN: 01/01/2023 (Confraternização Universal, 09h); 02/06/2024 (06h, domingo após Corpus Christi); 10/08/2025 (14h, Dia dos Pais).
+•	Sudeste/Centro-Oeste: 01/01/2023 (08h, feriado); 11/08/2024 (06h, Dia dos Pais); 06/07/2025 (04h, domingo).
+•	Sul: 09/04/2023 (13h, Páscoa, fim de semana prolongado); 13/10/2024 (05h, domingo após N. Sra. Aparecida); 10/08/2025 (14h, Dia dos Pais).
+•	Nordeste: 07/04/2023 (10h, Paixão de Cristo); 09/11/2024 (12h, sábado); 13/07/2025 (14h, domingo).
+•	Norte: 01/01/2023 (12h, feriado); 01/01/2024 (06h, feriado); 2025 em feriado de Natal às 15h (a data informada, "25/15/2025", é inválida e precisa de correção).
+3. Geração na carga máxima
+•	SIN: hidráulica com maior participação em todos os anos; térmica e eólica reduzem de 2023 para 2024 e 2025; fotovoltaica aumenta.
+•	Sudeste/Centro-Oeste: hidráulica predominante; térmica em queda; eólica praticamente nula; fotovoltaica em alta. Recebeu intercâmbio de outras regiões.
+•	Sul: mesmo perfil do Sudeste/Centro-Oeste (hidráulica predominante, térmica em queda, eólica nula, fotovoltaica em alta). Recebeu intercâmbio.
+•	Nordeste: eólica predominante; hidráulica e térmica caem em 2024 e crescem em 2025; fotovoltaica relevante quando a máxima ocorre em período claro. Forneceu intercâmbio às demais regiões.
+•	Norte: hidráulica maior em 2023, menor em 2024 e crescente em 2025; térmica sobe de 2023 para 2024 e fica próxima em 2025; eólica pequena; fotovoltaica relevante se a máxima ocorre em período claro. Recebeu intercâmbio.
+4. Geração na carga mínima
+•	SIN: hidráulica predominante; térmica aumenta; eólica reduz; fotovoltaica aumenta, dependendo do horário da mínima.
+•	Sudeste/Centro-Oeste: hidráulica predominante; térmica aumenta; eólica praticamente nula; fotovoltaica depende do horário. Recebeu intercâmbio.
+•	Nordeste: eólica e térmica com maior participação; hidráulica estável; fotovoltaica expressiva, pois as mínimas ocorreram em período claro. Forneceu intercâmbio.
+•	Sul: hidráulica predominante; térmica estável; eólica reduzida; fotovoltaica expressiva em 2025 (mínima no pico de sol). Recebeu intercâmbio.
+•	Norte: hidráulica maior em 2023, menor em 2024 e maior em 2025; térmica sobe em 2024 e cai em 2025; eólica pequena; fotovoltaica relevante se a mínima ocorre em período claro. Recebeu intercâmbio.
+pip freeze > requirements.txt
+#Salva o DataFrame final em um arquivo CSV
+caminho_saida = pasta / "BALANCO_ENERGIA_SUBSISTEMA_2023_2024_2025.csv"
+df_sem_ocorrencia.to_csv(caminho_saida, index=False, encoding='utf-8-sig', sep=";")
